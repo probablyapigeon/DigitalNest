@@ -1,0 +1,7 @@
+Extract the ZIP. Python 3.10+ required. On Windows double-click Start Little Flock.cmd.
+Mac/Linux: python3 server.py --open
+Fresh flock; existing local saves are retained. No personal save is included.
+Build adds structures. New world creates connected worlds. Click objects to operate them.
+Chat replies are read aloud with local system voices. Mute below chat.
+Full LLM chat additionally needs local Ollama with qwen3:4b-instruct. Offline game still works.
+See README.md for full controls.
