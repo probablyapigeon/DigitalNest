@@ -1,0 +1,4 @@
+* text=auto eol=lf
+*.cmd text eol=crlf
+# Preserve the supplied XC program bytes and their existing whitespace.
+*.xc -text -whitespace

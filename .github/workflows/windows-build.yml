@@ -1,0 +1,27 @@
+name: Test and package Windows
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.14'
+      - name: Test simulation and save compatibility
+        run: python -m unittest discover -s tests -v
+      - name: Build and smoke-test executable
+        shell: pwsh
+        run: ./build-windows.ps1
+      - uses: actions/upload-artifact@v4
+        with:
+          name: DigitalNest-Windows-x64
+          path: |
+            release/DigitalNest-Windows-x64.zip
+            release/SHA256SUMS.txt
