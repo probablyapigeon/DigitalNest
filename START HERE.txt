@@ -1,0 +1,9 @@
+﻿DigitalNest
+
+Download the runnable Windows program:
+https://github.com/probablyapigeon/DigitalNest/releases/latest
+Extract the whole ZIP, then double-click DigitalNest.exe. Keep _internal beside it.
+
+Source repository: install Python 3.10+, then run python server.py --open
+or on Windows double-click Start Little Flock.cmd.
+See README.md for controls, building, and optional local LLM chat.
