@@ -1,4 +1,5 @@
 import json
+import shutil
 import tempfile
 import unittest
 from pathlib import Path
@@ -55,11 +56,14 @@ class WorldTests(unittest.TestCase):
         self.open_habitat()
         self.world.act('cassette')
         baseline = self.world.export()
+        # A checkpoint branch includes both durable save components.
+        other_path = Path(self.temp.name) / 'other.json'
+        other_path.write_text(json.dumps(baseline), encoding='utf-8')
+        archive = self.world.archive.path
+        shutil.copy2(archive, archive.with_name('other' + archive.name[len(self.path.stem):]))
         self.world.act('reassure')
         self.world.act('listen')
         first = self.world.brains['pip'].export_checkpoint()
-        other_path = Path(self.temp.name) / 'other.json'
-        other_path.write_text(json.dumps(baseline), encoding='utf-8')
         other = World(other_path)
         other.act('listen')
         other.act('reassure')

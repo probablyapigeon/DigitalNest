@@ -1,5 +1,6 @@
 """Saved world topology, player supplies and part-funded habitat construction."""
 import copy
+from world_identity import visual_genome
 from spaces import SPACES
 from habitat_life import OBJECTS
 
@@ -115,25 +116,84 @@ class WorldBuilding:
             self.data['birds'][bird]['activity'] = f'building a {name.lower()}'
         return reply
 
-    def create_world(self, name, kind, link):
+    def create_world(self, name, kind, link, builder=None):
         self.require(self.data['habitat_open'], 'Meet the flock first.')
         self.require(isinstance(name, str) and 1 <= len(name.strip()) <= 40 and all(ord(c) >= 32 for c in name), 'Name your world using 1-40 printable characters.')
         self.require(isinstance(kind, str) and kind in SPACES and isinstance(link, str) and link in self.spaces(), 'Choose a theme and an existing portal connection.')
         self.require(len(self.spaces()) < MAX_WORLDS, f'This station has room for {MAX_WORLDS} worlds.')
         self.require(name.strip().casefold() not in {r['name'].casefold() for r in self.spaces().values()}, 'That world name is already in use.')
-        self.require(self.supplies() >= WORLD_COST, f'A new world needs {WORLD_COST} station parts.')
+        parts = self.data['birds'][builder]['scrap'] if builder else self.supplies()
+        self.require(parts >= WORLD_COST, f'A new world needs {WORLD_COST} parts.')
         serial = self.data.get('next_world', 1)
         key = f'world-{serial}'
         catalog = copy.deepcopy(self.spaces())
         catalog[key] = dict(name=name.strip(), kind=kind, subtitle='Built together. A new place to belong.',
                             color=SPACES[kind]['color'], icon=SPACES[kind]['icon'], links=[link], map=[0, 0])
+        catalog[key]['design'] = self.world_design(key, builder)
+        catalog[key]['builder'] = builder or 'user'
         catalog[link]['links'].append(key)
         self.data['world_catalog'] = catalog
         self.data['next_world'] = serial + 1
-        self.data['building_supplies'] = self.supplies() - WORLD_COST
+        if builder:
+            self.data['birds'][builder]['scrap'] -= WORLD_COST
+            self.data['birds'][builder]['worlds_built'] = self.data['birds'][builder].get('worlds_built', 0) + 1
+        else:
+            self.data['building_supplies'] = self.supplies() - WORLD_COST
         self.data['last_created_world'] = key
-        self.note('You', f"Built {name.strip()}, connected to {catalog[link]['name']}.")
+        self.note(self.specs[builder]['name'] if builder else 'You', f"Built {name.strip()}, connected to {catalog[link]['name']}.")
         return f"{name.strip()} is ready. A new portal connects it to {catalog[link]['name']}."
+
+    def world_design(self, room, builder=None):
+        bird = self.society.bird(builder) if builder else None
+        return visual_genome(self.data['instance_id'], self.data['player_identity'], room, builder or 'user',
+                             bird.personality if bird else None,
+                             self.data['birds'][builder].get('heart') if bird else None,
+                             self.archive.retrieve(builder, self.data['birds'][builder].get('activity', ''))['words'] if bird else ())
+
+    def plan_world(self, key):
+        self.require(self.data['habitat_open'], 'Meet the flock first.')
+        self.require(len(self.spaces()) < MAX_WORLDS, 'All world slots are occupied.')
+        bird = self.data['birds'][key]
+        self.require(not bird.get('world_project'), 'This bird already has a world project.')
+        traits = self.society.bird(key).personality
+        kind = 'garden' if traits['curiosity'] >= traits['aggression'] else 'workshop'
+        if bird.get('heart', {}).get('perturb', 0) > .3:
+            kind = 'roost'
+        elif traits['loyalty'] > 70:
+            kind = 'commons'
+        bird['world_project'] = dict(kind=kind, link=self.room_of(bird), started=self.data['tick'])
+        bird.setdefault('inner_life', {})['goal'] = f'Collect {WORLD_COST} parts to build a personal {kind}'
+        return f"{self.specs[key]['name']} is designing a {kind} and saving eight personal parts."
+
+    def advance_world_projects(self):
+        if len(self.spaces()) >= MAX_WORLDS:
+            for bird in self.data['birds'].values():
+                bird.pop('world_project', None)
+            return
+        if not any(b.get('world_project') for b in self.data['birds'].values()) and self.data['tick'] - self.data.get('last_bird_world', 0) >= 48:
+            candidates = [k for k, b in self.data['birds'].items() if b['nest'] >= 3
+                          and self.society.bird(k).social['stage'] == 'graduate' and not self.wants_nursery(k)]
+            if candidates:
+                key = min(candidates, key=lambda k: self.data['birds'][k].get('worlds_built', 0))
+                self.note(self.specs[key]['name'], self.plan_world(key))
+        for key, bird in self.data['birds'].items():
+            project = bird.get('world_project')
+            if not project or bird['scrap'] < WORLD_COST:
+                continue
+            serial = self.data.get('next_world', 1)
+            name = f"{self.specs[key]['name']}'s {project['kind'].title()} {serial}"
+            while name.casefold() in {s['name'].casefold() for s in self.spaces().values()}:
+                serial += 1
+                name = f"{self.specs[key]['name']}'s {project['kind'].title()} {serial}"
+            reply = self.create_world(name, project['kind'], project['link'], key)
+            bird.pop('world_project')
+            bird['destination'] = self.data['last_created_world']
+            bird['stay_until'] = self.data['tick'] + 6
+            bird['inner_life']['goal'] = f'Explore and decorate {name}'
+            self.data['last_bird_world'] = self.data['tick']
+            self.emit(key, reply, 'speech')
+            self.stimulate(key, 'HarmonicRise')
+            break
 
     def player_object_reason(self, room, item):
         if not self.data['habitat_open']:

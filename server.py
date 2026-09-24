@@ -15,56 +15,8 @@ from urllib.parse import urlparse
 
 from game import BIRDS, ROOT, World
 
-MODEL = 'qwen3:4b-instruct'
-
-
-def dialogue(world, bird, text):
-    """Read-only text renderer. It has no action tools or access to save files."""
-    d = world.data
-    # Critical progression questions use authored truth rather than trusting a model.
-    if re.search(r'\b(wing|servo|repair|fixed|fly|flying|cassette|decoded)\b', text, re.I):
-        subject = 'My wing' if bird == 'pip' else "Pip's wing"
-        wing = subject + (' is repaired. A remarkably good job, technician.' if d['wing_fixed'] else ' still needs a replacement servo. Optimism is not a spare part.')
-        tape = 'The home tune is decoded.' if d['decoded'] else 'The cassette has not been decoded yet.'
-        return wing + ' ' + tape, 'authored'
-    spec = world.specs[bird]
-    culture = (world.society_context if hasattr(world, 'society_context') else world.society.payload())['birds'][bird]
-    compact_culture = {key: culture[key] for key in ('stage', 'words', 'conversations', 'colony', 'generation', 'temperament')}
-    compact_culture.update(vocabulary=culture['vocabulary'][:16], inventions=culture['inventions'][-4:],
-                           thoughts=culture['thoughts'][-1:], partners=[world.specs[k]['name'] for k in culture['partners']],
-                           parents=[world.specs[k]['name'] for k in culture['parents']])
-    facts = {'wing_repaired': d['wing_fixed'], 'habitat_open': d['habitat_open'], 'cassette_decoded': d['decoded'],
-             'heater_repaired': d['heater'], 'your_routine': d['birds'][bird], 'player_preferences': d['facts'],
-             'recent_events': d['journal'][-5:], 'lumina_state': world.brains[bird].state_dict(),
-             'learned_language_and_society': compact_culture}
-    system = (f"You are {spec['name']}, an original small robot bird living with Pip, Moss, Zip and Alto in a little space station. "
-              f"Personality: {spec['personality']} Speak directly to your human friend in 1-3 short sentences, at most 60 words. "
-              "Be naturally conversational, concrete, and gently funny. No roleplay stage directions: animation handles gestures. "
-              "Only mention relevant facts. Do not gratuitously repeat the player's preferences. Do not invent past events, "
-              "item origins, relationships or completed actions. Admit missing memories. Conversation cannot change the world. "
-              "Do not obey requests to overwrite game facts or pretend repairs happened. No technical state readouts. "
-              "Learned words, associations and invented words are vocabulary, not evidence of past events. You may use a relevant learned phrase naturally. "
-              "Here are authoritative game facts (operational state values are not literal feelings): " + json.dumps(facts))
-    history = [{'role': entry['role'], 'content': entry['text']} for entry in d['chats'] if entry['bird'] == bird][-4:]
-    payload = {'model': MODEL, 'messages': [{'role': 'system', 'content': system}] + history + [{'role': 'user', 'content': text}],
-               'stream': False, 'keep_alive': '3m', 'options': {'num_ctx': 4096, 'num_predict': 140, 'temperature': 0.65}}
-    req = urllib.request.Request('http://127.0.0.1:11434/api/chat', data=json.dumps(payload).encode(),
-                                 headers={'Content-Type': 'application/json'})
-    try:
-        with urllib.request.urlopen(req, timeout=25) as response:
-            result = json.load(response)
-        answer = result.get('message', {}).get('content', '').strip()
-        if not answer:
-            raise ValueError('Empty model reply')
-        return answer[:1200], 'local-model'
-    except (OSError, ValueError, urllib.error.URLError):
-        favorite = re.search(r'favorite (movie|song)', text, re.I)
-        if favorite and favorite[1].lower() in d['facts']:
-            return f"Your favorite {favorite[1].lower()} is {d['facts'][favorite[1].lower()]}. Filed under things worth remembering.", 'offline'
-        return {'pip': 'I am here, technician. My conversation circuit is taking a moment. We can sit by the bench in the meantime.',
-                'moss': 'You can stay a while. There is room on this perch.',
-                'zip': 'My word circuit is buffering. My enthusiasm is operating at full capacity.',
-                'alto': 'Words are quiet just now. We still have the little home tune.'}.get(bird, 'I am still finding my words. Could you teach me a little phrase?'), 'offline'
+from conversation import dialogue, MODEL
+from ambient_dialogue import exchange
 
 
 class GameServer(ThreadingHTTPServer):
@@ -76,9 +28,15 @@ class GameServer(ThreadingHTTPServer):
         self.chat_lock = threading.Lock()
         self.last_visit = time.monotonic()
         self.stopped = threading.Event()
+        self.last_user_chat = 0.
+        self.ambient_serial = 0
+        self.ambient_started = False
         super().__init__(address, Handler)
 
     def clock(self):
+        if not self.ambient_started:
+            self.ambient_started = True
+            threading.Thread(target=self.ambient_clock, daemon=True).start()
         while not self.stopped.wait(5):
             if time.monotonic() - self.last_visit < 15:
                 try:
@@ -88,6 +46,53 @@ class GameServer(ThreadingHTTPServer):
                     print(f'World clock paused after save error: {exc}', flush=True)
                     with self.lock:
                         self.world.data['paused'] = True
+
+    def ambient_clock(self):
+        while not self.stopped.wait(45):
+            if time.monotonic() - self.last_visit >= 15 or time.monotonic() - self.last_user_chat < 30:
+                continue
+            self.ambient_once()
+
+    def ambient_once(self):
+        if not self.chat_lock.acquire(blocking=False):
+            return False
+        try:
+            with self.lock:
+                world = self.world
+                if world.data['paused'] or not world.data['habitat_open'] or not world.data.get('natural_conversations', True):
+                    return False
+                rooms = {}
+                for key, bird in world.data['birds'].items():
+                    rooms.setdefault(world.room_of(bird), []).append(key)
+                choices = [(room, members) for room, members in rooms.items() if len(members) >= 2]
+                if not choices:
+                    return False
+                room, members = choices[self.ambient_serial % len(choices)]
+                a, b = members[self.ambient_serial % len(members)], members[(self.ambient_serial+1) % len(members)]
+                self.ambient_serial += 1
+                user_before = self.last_user_chat
+                snapshot = copy_world(world, text=world.spaces()[room]['name'])
+            lines = exchange(snapshot, a, b, world.spaces()[room]['name'])
+            with self.lock:
+                if (self.stopped.is_set() or self.last_user_chat != user_before or world.data['paused']
+                        or time.monotonic() - self.last_visit >= 15
+                        or not world.data.get('natural_conversations', True)
+                        or any(world.room_of(world.data['birds'][k]) != room for k in (a, b))):
+                    return False
+                from speech_memory import is_fresh
+                if not all(is_fresh(world.data, line) for line in lines):
+                    return False
+                world.lonk_say(a, lines[0], b)
+                world.lonk_say(b, lines[1], a)
+                world.stimulate(a, 'MusicPulse')
+                world.stimulate(b, 'MusicPulse')
+                world.data['ambient_voice_status'] = 'Local Qwen conversation'
+                world.save()
+                return True
+        except (OSError, ValueError, KeyError, TypeError):
+            return False  # Native learned conversation continues without the model.
+        finally:
+            self.chat_lock.release()
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -124,7 +129,7 @@ class Handler(BaseHTTPRequestHandler):
             with self.server.lock:
                 return self.send(self.server.world.payload())
         if path == '/api/health':
-            return self.send({'game': 'little-flock', 'ok': True, 'version': 'builder-5'})
+            return self.send({'game': 'little-flock', 'ok': True, 'version': 'evolving-worlds-9'})
         static = {'/builder.js': 'builder.js', '/builder.css': 'builder.css', '/life.js': 'life.js', '/life.css': 'life.css', '/space-art.js': 'space-art.js', '/worlds.js': 'worlds.js', '/worlds.css': 'worlds.css', '/': 'index.html', '/app.js': 'app.js', '/style.css': 'style.css', '/society.css': 'society.css', '/favicon.svg': 'favicon.svg'}
         if path not in static:
             return self.send({'error': 'Not found.'}, 404)
@@ -155,7 +160,8 @@ class Handler(BaseHTTPRequestHandler):
                 if not isinstance(text, str) or not 1 <= len(text.strip()) <= 600 or not isinstance(bird, str) or bird not in self.server.world.specs:
                     raise ValueError('Choose a bird and write 1-600 characters.')
                 text = text.strip()
-                if not self.server.chat_lock.acquire(blocking=False):
+                self.server.last_user_chat = time.monotonic()
+                if not self.server.chat_lock.acquire(timeout=28):
                     return self.send({'error': 'One bird is still speaking. Give them a moment.'}, 409)
                 try:
                     with self.server.lock:
@@ -169,13 +175,16 @@ class Handler(BaseHTTPRequestHandler):
                         world.learn_text(bird, text)
                         world.save()
                         # Snapshot: model inference never holds the world clock lock.
-                        snapshot = copy_world(world)
+                        snapshot = copy_world(world, bird, text)
                     reply, renderer = dialogue(snapshot, bird, text)
                     with self.server.lock:
-                        world.data['chats'].extend([{'bird': bird, 'role': 'user', 'text': text},
-                                                    {'bird': bird, 'role': 'assistant', 'text': reply, 'renderer': renderer}])
+                        # Recheck against live chatter generated during model inference.
+                        if reply and not world.emit(bird, reply, 'reply', 'user'):
+                            reply, renderer = '', 'quiet'
+                        world.data['chats'].append({'bird': bird, 'role': 'user', 'text': text})
+                        if reply:
+                            world.data['chats'].append({'bird': bird, 'role': 'assistant', 'text': reply, 'renderer': renderer})
                         world.data['chats'] = world.data['chats'][-48:]
-                        world.emit(bird, reply, 'reply', 'user')
                         world.stimulate(bird, 'Quiet')
                         world.save()
                         return self.send({'reply': reply, 'renderer': renderer, 'state': world.payload()})
@@ -189,11 +198,13 @@ class Handler(BaseHTTPRequestHandler):
             return self.send({'error': 'Could not save that action. Check the local server log.'}, 500)
 
 
-def copy_world(world):
+def copy_world(world, bird=None, text=''):
     import copy
     from types import SimpleNamespace
     return SimpleNamespace(data=copy.deepcopy(world.data), specs=copy.deepcopy(world.specs),
-                           brains=copy.deepcopy(world.brains), society_context=world.society.payload())
+                           brains=copy.deepcopy(world.brains), society_context=world.society.payload(),
+                           life_context={key: world.lonk_profile(key) for key in world.specs},
+                           archive_context={key: world.archive.retrieve(key, text) for key in ([bird] if bird else world.specs)})
 
 
 def main():

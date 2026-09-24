@@ -4,13 +4,17 @@ import json
 import os
 import shutil
 import re
+import uuid
 from pathlib import Path
 
 from vendor import xc
+from lonk_life import LonkLife
 from flock_society import FlockSociety, MAX_FLOCK
 from spaces import SPACES, LOCATION_SPACE, next_portal
 from habitat_life import HabitatLife, OBJECTS
 from world_building import WorldBuilding, BLUEPRINTS
+from language_archive import LanguageArchive
+from heart import initial_heart, heart_event
 
 ROOT = Path(__file__).resolve().parent
 SOURCE = (ROOT / 'vendor' / 'lumina_core.xc').read_text(encoding='utf-8')
@@ -30,7 +34,7 @@ IR = {key: xc.compile_text(SOURCE.replace('seed = 260914', f"seed = {spec['seed'
       for key, spec in BIRDS.items()}
 
 
-class World(HabitatLife, WorldBuilding):
+class World(HabitatLife, WorldBuilding, LonkLife):
     def __init__(self, save_path):
         self.path = Path(save_path)
         self.specs = copy.deepcopy(BIRDS)
@@ -78,6 +82,29 @@ class World(HabitatLife, WorldBuilding):
             self.note('Station log', 'A quiet station. Four small lives. One spare pair of hands.')
             self.society = FlockSociety(self.specs)
 
+        self.data.setdefault('instance_id', uuid.uuid5(uuid.NAMESPACE_URL, str(self.path.resolve()) + str(self.data['tick'])).hex if self.path.exists() else uuid.uuid4().hex)
+        self.data.setdefault('player_identity', uuid.uuid5(uuid.NAMESPACE_URL, str(self.path.parent.resolve())).hex)
+        self.archive = LanguageArchive(self)
+        language = self.society.app.procedures.namespaces['language']
+        native_learn = language.learn
+        def archived_learn(lonk, message, speaker_id='player', internal=False):
+            if not internal:
+                key = self.society.key(lonk.uid)
+                if key:
+                    self.archive.seed_existing()
+                    self.archive.queue(key, message, str(speaker_id))
+            return native_learn(lonk, message, speaker_id, internal)
+        language._scope['learn'] = archived_learn
+        native_innovate = language._innovate
+        def archived_innovation(lonk, word):
+            self.archive.seed_existing()
+            result = native_innovate(lonk, word)
+            key = self.society.key(lonk.uid)
+            if key and result != word:
+                self.archive.queue(key, result, 'invention')
+            return result
+        language._scope['_innovate'] = archived_innovation
+
     def brain_ir(self, key):
         if key in IR:
             return IR[key]
@@ -88,6 +115,7 @@ class World(HabitatLife, WorldBuilding):
                               'brains': {k: b.export_checkpoint() for k, b in self.brains.items()}})
 
     def save(self):
+        self.archive.seed_existing()
         self.path.parent.mkdir(parents=True, exist_ok=True)
         if self._needs_legacy_backup and self.path.exists():
             backup = self.path.with_name(self.path.stem + '.before-society.json')
@@ -100,6 +128,7 @@ class World(HabitatLife, WorldBuilding):
             handle.flush()
             os.fsync(handle.fileno())
         os.replace(temp, self.path)
+        self.archive.flush()
 
     def note(self, who, text):
         self.data['journal'].append({'tick': self.data['tick'], 'who': who, 'text': text})
@@ -107,6 +136,8 @@ class World(HabitatLife, WorldBuilding):
 
     def stimulate(self, key, event):
         brain = self.brains[key]
+        heart = self.data['birds'][key].setdefault('heart', initial_heart())
+        heart_event(heart, {'Quiet': .55, 'NovelInput': .7, 'HarmonicRise': .85, 'MusicPulse': .8}.get(event, .5))
         before = brain.morphology_summary()['Structural']['nodes']
         brain.dispatch(event)
         after = brain.morphology_summary()['Structural']['nodes']
@@ -120,7 +151,15 @@ class World(HabitatLife, WorldBuilding):
     def act(self, action, bird='pip', value=None):
         self.require(bird in self.specs, 'Unknown bird.')
         d = self.data
-        if action == 'wake':
+        if action == 'natural_conversations':
+            d['natural_conversations'] = not d.get('natural_conversations', True)
+            reply = 'Natural conversations enabled.' if d['natural_conversations'] else 'The birds will use their learned language without the local model.'
+        elif action == 'plan_world':
+            reply = self.plan_world(bird)
+        elif action == 'lonk_life':
+            self.require(isinstance(value, dict), 'Choose a Lonk activity.')
+            reply = self.lonk_event(bird, value.get('event'), value.get('target'))
+        elif action == 'wake':
             self.require(not d['awake'], 'Pip is already awake.')
             d['awake'] = True
             d['birds']['pip']['activity'] = 'waiting by the repair bench'
@@ -270,7 +309,7 @@ class World(HabitatLife, WorldBuilding):
             reply = 'Take your time. We will be right here.' if d['paused'] else 'Station routines resumed. The washer audit continues.'
         else:
             raise ValueError('Unknown action.')
-        self.note(self.specs[bird]['name'] if action in ('gift', 'whistle', 'teach_words', 'visit', 'nursery', 'interact', 'tinker', 'share_part') else 'Pip', reply)
+        self.note(self.specs[bird]['name'] if action in ('gift', 'whistle', 'teach_words', 'visit', 'nursery', 'interact', 'tinker', 'share_part', 'plan_world') else 'Pip', reply)
         self.save()
         return reply
 
@@ -285,8 +324,18 @@ class World(HabitatLife, WorldBuilding):
                 target = next((k for k, spec in self.specs.items() if len(speakers) > 1 and spec['name'] == speakers[1]), None)
                 if key:
                     self.emit(key, match[2], 'speech', target)
+                    if (target and self.data['taught'] and self.data['birds'][key]['knows_song']
+                            and not self.data['birds'][target]['knows_song']
+                            and self.room_of(self.data['birds'][key]) == self.room_of(self.data['birds'][target])):
+                        self.data['birds'][target]['knows_song'] = True
+                        self.stimulate(target, 'MusicPulse')
+                        self.note(self.specs[target]['name'], 'Picked up the home tune while talking with a flock friend.')
 
     def learn_text(self, target, text):
+        for key in (list(self.specs) if target == 'everyone' else [target]):
+            self.archive.activate(key, text)
+            heart_event(self.data['birds'][key].setdefault('heart', initial_heart()), .7,
+                        pressure=bool(re.search(r'\b(hate|hurt|bad|stop)\b', text, re.I)))
         for key in self.society.learn(target, text):
             self.stimulate(key, 'NovelInput')
         self.social_notes()
@@ -322,6 +371,7 @@ class World(HabitatLife, WorldBuilding):
         self.data['birds'][parent]['scrap'] -= 3
         self.data['birds'][parent]['last_hatch'] = self.data['tick']
         self.brains[key] = xc.Runtime(self.brain_ir(key))
+        self.archive.queue(key, '', 'inherited:' + parent, parent=parent)
         self.stimulate(key, 'HarmonicRise')
         self.social_notes()
         return key
@@ -349,6 +399,7 @@ class World(HabitatLife, WorldBuilding):
         if d['paused'] or not d['habitat_open']:
             return
         d['tick'] += 1
+        self.lonk_tick()
         for index, (key, bird) in enumerate(d['birds'].items()):
             brain = self.brains[key]
             if bird.get('destination') and (self.room_of(bird) != bird['destination'] or d['tick'] <= bird.get('stay_until', 0)):
@@ -372,6 +423,16 @@ class World(HabitatLife, WorldBuilding):
             if bird['energy'] < 35:
                 activity, place, event = 'recharging', 'nest', 'Quiet'
                 bird['energy'] = min(100, bird['energy'] + 22)
+            elif bird.get('world_project'):
+                activity, place, event = 'saving parts for a world of their own', 'scrap', 'NovelInput'
+                bird['scrap'] = min(8, bird['scrap'] + 1)
+            elif self.wants_nursery(key) and bird['nest'] >= 2:
+                bird['inner_life']['goal'] = 'Save three parts for a little descendant'
+                if bird['scrap'] < 3:
+                    activity, place, event = 'collecting parts for a nursery', 'scrap', 'NovelInput'
+                    bird['scrap'] += 1
+                else:
+                    activity, place, event = 'preparing a nursery', 'nest', 'HarmonicRise'
             elif bird['scrap'] >= 3 and bird['nest'] < 5:
                 activity, place, event = 'building a perch', 'nest', 'HarmonicRise'
                 bird['scrap'] -= 3
@@ -403,14 +464,7 @@ class World(HabitatLife, WorldBuilding):
                 activity, place, event = 'collecting spare parts', 'scrap', 'NovelInput'
                 bird['scrap'] = min(8, bird['scrap'] + 1)
             else:
-                activity, place, event = {
-                    'FLOW': ('visiting the garden', 'garden', 'HarmonicRise'),
-                    'BRANCH': ('investigating the scrap pile', 'scrap', 'NovelInput'),
-                    'CONTRACT': ('tending their nest', 'nest', 'Quiet'),
-                    'RESONATE': ('singing to the vents', 'choir', 'MusicPulse'),
-                }.get(brain.action, ('warming their feet', 'heater', 'Quiet'))
-                if brain.action == 'BRANCH':
-                    bird['scrap'] = min(8, bird['scrap'] + 1)
+                activity, place, event = self.lonk_routine(key)
             old_room = self.room_of(bird)
             bird['activity'], bird['location'] = activity, place
             bird['room'] = old_room
@@ -435,7 +489,7 @@ class World(HabitatLife, WorldBuilding):
                         self.stimulate(learner, 'MusicPulse')
                         self.note(self.specs[learner]['name'], 'Learned the home tune from a flock friend. A tiny tradition takes root.')
         heard_before = {key: self.society.bird(key).linguistics['total_heard'] for key in self.specs}
-        self.society.tick(d['tick'])
+        self.society.tick(d['tick'], {key: self.room_of(bird) for key, bird in d['birds'].items()})
         for key in self.specs:
             if self.society.bird(key).linguistics['total_heard'] > heard_before[key]:
                 self.stimulate(key, 'MusicPulse')
@@ -445,6 +499,7 @@ class World(HabitatLife, WorldBuilding):
                 if thought['tick'] == d['tick']:
                     self.emit(key, thought['text'], 'thought')
         self.autonomous_objects()
+        self.advance_world_projects()
         self.apply_building_effects()
         # Nursery construction is paced and nonlethal. Parents remain in the flock.
         if d['tick'] % 12 == 0:
@@ -457,9 +512,12 @@ class World(HabitatLife, WorldBuilding):
 
     def payload(self):
         d = copy.deepcopy(self.data)
+        d.pop('spoken_phrases', None)
+        d.pop('_language_pending', None)
         d['spaces'] = copy.deepcopy(self.spaces())
         d['building'] = self.building_payload()
         for room_id, room in d['spaces'].items():
+            room.setdefault('design', self.world_design(room_id))
             room['residents'] = [key for key, b in d['birds'].items() if self.room_of(b) == room_id]
             room['visits'] = sum(1 for entry in d['journal'] if f"to {room['name']}." in entry['text'])
         d['objects'] = {room: self.room_items(room) for room in self.spaces()}
@@ -476,6 +534,8 @@ class World(HabitatLife, WorldBuilding):
             bird.update({k: v for k, v in self.specs[key].items() if k not in ('seed', 'personality')})
             bird['room'] = self.room_of(bird)
             bird['culture'] = d['society']['birds'][key]
+            bird['archive'] = self.archive.stats(key)
+            bird['inner_life'] = self.lonk_profile(key)
             bird['nursery_reason'] = self.nursery_reason(key)
             bird.update(state=brain.state_dict(), policy=brain.action, events=brain.event_counter,
                         morphology=brain.morphology_summary()['Structural'],

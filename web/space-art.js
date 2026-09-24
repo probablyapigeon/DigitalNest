@@ -6,21 +6,21 @@ window.SpaceArt = (()=>{
   function text(g,s,x,y,c='#c6d1b4',size=9){g.fillStyle=c;g.font=`${size}px Segoe UI,sans-serif`;g.textAlign='center';g.fillText(s,x,y)}
   function plant(g,x,y,size=1){g.save();g.translate(x,y);g.scale(size,size);box(g,-15,0,30,25,5,'#9b8661');oval(g,0,0,15,5,'#405d43');stroke(g,[[0,0],[0,-48]],'#b0c397',3);for(let i=0;i<4;i++){g.save();g.translate(i%2?9:-8,-12-i*9);g.rotate(i%2?.7:-.7);oval(g,0,0,8,17,i%2?'#aecb95':'#78a782');g.restore()}g.restore()}
   function lamp(g,x,y){stroke(g,[[x,y-55],[x,y]],'#8d9c85',2);oval(g,x,y,25,9,'#b9b48d');oval(g,x,y+3,20,5,'#e9d49b')}
-  function base(g,id,t){
+  function base(g,id,t,design){
     const palettes={garden:['#3f655b','#76936c'],roost:['#354659','#667488'],archive:['#51475d','#86766c'],nursery:['#525a4c','#8f9476'],commons:['#604e49','#927e69']};
-    const [wall,floor]=palettes[id]||palettes.commons;
+    const original=palettes[id]||palettes.commons;const wall=design?`hsl(${design.hue} 30% ${23+design.warmth*9}%)`:original[0],floor=design?`hsl(${design.accent} 26% 46%)`:original[1];
     oval(g,0,178,440,105,'#071a2240');box(g,-415,-223,830,380,105,wall,'#a5b49644');
     box(g,-383,-198,766,230,80,'#17333d','#adc3b455');
     g.save();g.beginPath();g.roundRect(-383,-198,766,230,80);g.clip();
     for(let i=0;i<55;i++)oval(g,Math.sin(i*77)*370,-184+(i*41%199),i%8===0?1.7:.7,i%8===0?1.7:.7,'#dbe1b96b');
     if(id==='roost'){oval(g,208,-107,73,73,'#b2c1b6');oval(g,225,-120,66,66,'#17333d');}
     if(id==='garden'){const light=g.createLinearGradient(0,-198,0,32);light.addColorStop(0,'#b9d39a44');light.addColorStop(1,'#7eafa122');g.fillStyle=light;g.fillRect(-383,-198,766,230);for(let i=-2;i<3;i++)stroke(g,[[i*140,-195],[i*170,30]],'#afc1aa66',4);}
-    g.restore();oval(g,0,59,440,187,'#243c40');oval(g,0,44,440,181,floor);oval(g,0,39,424,171,wall+'55');
+    g.restore();oval(g,0,59,440,187,'#243c40');oval(g,0,44,440,181,floor);oval(g,0,39,424,171,design?`hsl(${design.hue} 40% 55% / .18)`:wall+'55');
     g.save();g.beginPath();g.ellipse(0,39,420,169,0,0,Math.PI*2);g.clip();for(let i=-5;i<6;i++){stroke(g,[[i*80-110,-135],[i*80+120,225]],'#dce3c11a',1);stroke(g,[[-440,i*46],[440,i*46]],'#dce3c11a',1)}g.restore();
     lamp(g,-255,-167);lamp(g,255,-167);
   }
-  function draw(g,id,t=0,world={},name=null){
-    base(g,id,t);
+  function draw(g,id,t=0,world={},name=null,design=null){
+    base(g,id,t,design);
     if(id==='garden'){
       for(const [x,y,s] of [[-300,-52,1.7],[-230,-65,1.2],[260,-58,1.6],[325,-25,1.1],[-290,108,1.3],[220,140,1.2]])plant(g,x,y,s);
       oval(g,0,72,138,64,'#496f66');oval(g,0,67,125,54,'#89aaa0');oval(g,0,67,112,46,'#628f85');
@@ -54,6 +54,43 @@ window.SpaceArt = (()=>{
       for(let i=0;i<3;i++)text(g,'♫',250+i*26,-120-Math.sin(t+i)*6,'#cbdcb0',18);
       text(g,name||'THE COMMONS',0,-153,'#e2c6ac',12);text(g,'ALL FLUFF, FEATHERS & FIRMWARE WELCOME',0,196,'#d8c6ad',8);
     }
+    decorate(g,design);
   }
-  return {draw};
+  function decorate(g,design){
+    if(!design)return;
+    let seed=design.seed>>>0;
+    const random=()=>{seed^=seed<<13;seed^=seed>>>17;seed^=seed<<5;return (seed>>>0)/4294967296;};
+    const ink=`hsl(${design.accent} 58% 73%)`,shade=`hsl(${design.hue} 40% 42%)`;
+    g.save();
+    // Builder-specific skyline, kept away from the interaction hotspots.
+    for(let i=0;i<design.density;i++){
+      const x=-355+i*710/(design.density-1),y=-190+random()*37,size=8+random()*18;
+      if(design.silhouette==='orbits'){
+        g.strokeStyle=ink;g.lineWidth=1.4;g.beginPath();g.ellipse(x,y,size,size*.4,random()*2,0,Math.PI*2);g.stroke();oval(g,x,y,3,3,ink);
+      }else if(design.silhouette==='spires'){
+        stroke(g,[[x-size,y+20],[x,y-size],[x+size,y+20]],ink,2);
+      }else if(design.silhouette==='arches'){
+        g.strokeStyle=ink;g.lineWidth=3;g.beginPath();g.arc(x,y+15,size,Math.PI,0);g.stroke();
+      }else{
+        oval(g,x,y,size,size*.7,shade);stroke(g,[[x,y],[x,y+27]],ink,2);
+      }
+    }
+    g.globalAlpha=.28;
+    g.strokeStyle=ink;g.lineWidth=1.5;
+    if(design.pattern==='rings'){
+      for(let i=0;i<4;i++){g.beginPath();g.ellipse(0,160,85+i*65,14+i*9,0,0,Math.PI*2);g.stroke();}
+    }else if(design.pattern==='rays'){
+      for(let i=0;i<10;i++)stroke(g,[[0,168],[-320+i*70,210]],ink,2);
+    }else{
+      for(let i=0;i<12;i++)box(g,-290+i*50,185+(i%2)*12,23,12,3,ink);
+    }
+    g.globalAlpha=1;
+    // A unique little builder crest; its geometry is generated from the saved seed.
+    const arms=4+Math.floor(random()*5),cx=325,cy=100;
+    for(let i=0;i<arms;i++){const a=i*Math.PI*2/arms;stroke(g,[[cx,cy],[cx+Math.cos(a)*25,cy+Math.sin(a)*20]],ink,3);oval(g,cx+Math.cos(a)*25,cy+Math.sin(a)*20,4,4,shade);}
+    oval(g,cx,cy,7,7,ink);
+    if(design.motifs?.length)text(g,design.motifs.slice(0,3).join(' / '),0,-211,ink,9);
+    g.restore();
+  }
+  return {draw,decorate};
 })();

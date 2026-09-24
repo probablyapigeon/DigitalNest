@@ -28,6 +28,28 @@ window.WorldLife = (()=>{
     }
     bubbleEvents=bubbleEvents.filter(e=>e.until>performance.now()).slice(-8);nextVoice();
     $('partsTray').hidden=!state.habitat_open;$('roomLife').hidden=!state.habitat_open;
+    let soul=$('lonkLife');
+    if(!soul){soul=document.createElement('div');soul.id='lonkLife';$('partsTray').append(soul);}
+    const life=b.inner_life||{};
+    const chosenPartner=soul.querySelector('select')?.value;
+    soul.replaceChildren();
+    const title=document.createElement('h3');title.textContent='A little life of their own';soul.append(title);
+    for(const text of [life.goal||'Finding something worth caring about',life.emotions?`Feeling: joy ${Math.round(life.emotions.joy)}, courage ${Math.round(life.emotions.courage)}, worry ${Math.round(life.emotions.anxiety)}`:'',life.faction?`Club: ${life.faction}`:'',life.catchphrase?`Catchphrase: ${life.catchphrase}`:'',life.rival?`Friendly rival: ${names[life.rival]}`:'',`Keepsakes: ${(life.inventory||[]).join(', ')||'Nothing collected yet'}`]){
+      if(!text)continue;const p=document.createElement('p');p.className='hint';p.textContent=text;soul.append(p);
+    }
+    if(state.tick<(life.ready_at||0)){const p=document.createElement('p');p.className='hint';p.textContent='Let this adventure settle for '+(life.ready_at-state.tick)+' ticks'+(state.paused?' (resume the world to continue).':'.');soul.append(p);}
+    const archive=document.createElement('p');archive.className='hint';archive.textContent=`Language archive: ${b.archive?.words||0} words kept / ${b.culture?.words||0} active. ${b.archive?.experiences||0} remembered lessons.`;soul.append(archive);
+    if(b.heart){const p=document.createElement('p');p.className='hint';p.textContent=`Heart: ${b.heart.perturb>.35?'seeking calm':b.heart.light>b.heart.darkness+.15?'open and connected':'watchful and curious'}`;soul.append(p);}
+    const project=document.createElement('button');project.className='secondary';project.textContent=b.world_project?`Designing ${b.world_project.kind}: ${b.scrap}/8 parts`:'Design your own world';project.disabled=busy||!!b.world_project||Object.keys(state.spaces).length>=state.building.max_worlds;project.onclick=()=>act('plan_world');soul.append(project);
+    const natural=document.createElement('button');natural.className='secondary';natural.textContent=`Natural conversations: ${state.natural_conversations===false?'off':'on'}`;natural.disabled=busy;natural.onclick=()=>act('natural_conversations');soul.append(natural);
+    const friends=keys.filter(k=>k!==selected&&state.birds[k].room===b.room);
+    const partner=document.createElement('select');partner.setAttribute('aria-label','Lonk activity partner');
+    partner.replaceChildren(...friends.map(k=>option(k,names[k])));if(friends.includes(chosenPartner))partner.value=chosenPartner;soul.append(partner);
+    for(const [event,label] of [['forage','Find a keepsake'],['dream','Dream'],['hug','Hug'],['contest','Leaf duel'],['gossip','Share a memory'],['keepsake_gift','Give keepsake']]){
+      const button=document.createElement('button');button.className='secondary';button.textContent=label;
+      button.disabled=busy||state.tick<(life.ready_at||0)||((event==='contest'||event==='gossip'||event==='keepsake_gift')&&!friends.length)||(event==='keepsake_gift'&&!(life.inventory||[]).length);
+      button.onclick=()=>act('lonk_life',{event,target:partner.value});soul.append(button);
+    }
     $('partsCount').textContent=`${b.scrap}/8`;$('partsHint').textContent=`${b.toys||0} toys built. Open Build to turn parts into permanent world structures.`;
     $('tinker').disabled=busy||b.scrap<2;
     const friend=$('shareFriend').value;
@@ -63,6 +85,11 @@ window.WorldLife = (()=>{
     if(kind==='nursery'){for(let i=0;i<Math.min(5,uses.mobile||0);i++)ellipse(g,-95+i*45,150,9,7,['#deb882','#a7c69b','#b0a2c6'][i%3]);}
     if(kind==='workshop'){const toys=Object.values(state.birds).reduce((n,b)=>n+(b.toys||0),0);for(let i=0;i<Math.min(5,toys);i++){const x=-280+i*26;round(g,x,137,16,14,4,'#d6b374');ellipse(g,x+3,153,3,3,'#253e40');ellipse(g,x+13,153,3,3,'#253e40');}}
     g.restore();
+    for(const [key,box] of Object.entries(hitboxes)){
+      if(state.birds[key]?.room!==room||!state.birds[key]?.inner_life?.treasure)continue;
+      g.save();g.translate(box.x+20,box.y+12);g.rotate(Math.PI/4);
+      g.fillStyle='#efd080';g.strokeStyle='#81622c';g.lineWidth=1.5;g.fillRect(-5,-5,10,10);g.strokeRect(-5,-5,10,10);g.restore();
+    }
     const recent=bubbleEvents.filter(e=>e.until>performance.now()&&e.room===room&&hitboxes[e.bird]);
     const chosen=[...new Map(recent.map(e=>[e.bird,e])).values()].slice(w<600?-1:-3),occupied=[];
     for(const e of chosen){const box=hitboxes[e.bird],width=Math.min(200,w-32);let x=Math.max(12,Math.min(w-width-12,box.x-width/2)),y=Math.max(210,box.y-125);

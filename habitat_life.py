@@ -1,5 +1,6 @@
 """Interactive room objects, resource sinks and a bounded, saved dialogue stream."""
 from vendor.lonkworld import lonk_language as language
+from speech_memory import remember_speech
 
 OBJECTS = {
     'workshop': [dict(id='workbench', name='Workbench', label='Build a wind-up toy', cost=2, x=-250, y=100),
@@ -20,12 +21,18 @@ OBJECTS = {
 class HabitatLife:
     def emit(self, bird, text, kind='speech', target=None):
         d = self.data
+        if kind in ('speech', 'reply', 'thought') and not remember_speech(d, text):
+            return False
+        if kind in ('speech', 'reply') and hasattr(self, 'archive'):
+            self.archive.seed_existing()
+            self.archive.queue(bird, text, 'self-expression')
         serial = d.get('voice_serial', 0) + 1
         d['voice_serial'] = serial
         event = dict(id=serial, tick=d['tick'], bird=bird, text=str(text)[:600], kind=kind,
                      target=target, room=self.room_of(d['birds'][bird]))
         d.setdefault('voices', []).append(event)
         d['voices'] = d['voices'][-80:]
+        return True
 
     def object_reason(self, bird, room, item):
         b = self.data['birds'][bird]
@@ -130,6 +137,10 @@ class HabitatLife:
         keys = list(self.specs)
         key = keys[self.data['tick'] % len(keys)]
         b = self.data['birds'][key]
+        if b.get('world_project'):
+            return
+        if self.wants_nursery(key) and b['nest'] >= 2:
+            return  # Reserve parts for the parent's nursery goal.
         if b['scrap'] >= 2 and b['nest'] >= 5 and self.nursery_reason(key) is not None:
             from world_building import BLUEPRINTS
             available = [bp for bp in BLUEPRINTS if self.build_reason(self.room_of(b), bp, key) is None]

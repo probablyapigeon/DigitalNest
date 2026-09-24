@@ -56,5 +56,17 @@ class HTTPTests(unittest.TestCase):
         self.assertEqual(error.exception.code, 400)
         error.exception.close()
 
+    def test_live_reply_guard_prevents_duplicate_chat_and_voice(self):
+        self.post('/api/action', {'action': 'wake'})
+        with patch('server.dialogue', return_value=('A completely fresh little bird thought.', 'local-model')):
+            first = self.post('/api/chat', {'text': 'Hello', 'bird': 'pip'})
+            second = self.post('/api/chat', {'text': 'Another topic', 'bird': 'pip'})
+        self.assertEqual(first['renderer'], 'local-model')
+        self.assertEqual(second['renderer'], 'quiet')
+        self.assertEqual(second['reply'], '')
+        replies = [e for e in second['state']['voices'] if e['kind'] == 'reply']
+        self.assertEqual(len(replies), 1)
+        self.assertEqual(len([c for c in second['state']['chats'] if c['role'] == 'assistant']), 1)
+
 if __name__ == '__main__':
     unittest.main()

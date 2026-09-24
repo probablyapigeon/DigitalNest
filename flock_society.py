@@ -68,9 +68,18 @@ class FlockSociety:
         right.speak(target=left)
         society.develop(left)
         society.develop(right)
-        society.society_tick(self.world)
+        self.maintain_society()
 
-    def tick(self, tick):
+    def maintain_society(self):
+        culture = self.world.config['culture']
+        chance = culture.get('conversation_chance', 0.9)
+        culture['conversation_chance'] = 0
+        try:
+            society.society_tick(self.world)
+        finally:
+            culture['conversation_chance'] = chance
+
+    def tick(self, tick, rooms=None):
         self.world.tick = tick
         for bird in self.world.lonks:
             bird.age += 1
@@ -80,7 +89,26 @@ class FlockSociety:
                 if thought:
                     bird.social['thoughts'].append({'tick': tick, 'text': thought})
                     bird.social['thoughts'] = bird.social['thoughts'][-self.world.config['culture']['thought_history']:]
-        society.society_tick(self.world)
+        if rooms is None:
+            society.society_tick(self.world)
+            return
+        # Keep native colony/development maintenance, but let the graphical
+        # habitat choose physically present conversational partners.
+        culture = self.world.config['culture']
+        chance = culture.get('conversation_chance', 0.9)
+        self.maintain_society()
+        groups = {}
+        for key, room in rooms.items():
+            groups.setdefault(room, []).append(key)
+        for members in groups.values():
+            if len(members) < 2 or self.world.rng.random() >= chance:
+                continue
+            a, b = self.world.rng.sample(members, 2)
+            left, right = self.bird(a), self.bird(b)
+            left.speak(target=right)
+            right.speak(target=left)
+            society.develop(left)
+            society.develop(right)
 
     def hatch(self, parent_key, child_key, name):
         if len(self.world.lonks) >= MAX_FLOCK:

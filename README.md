@@ -66,6 +66,54 @@ age-death, violence, and replacement-rebirth loop is not run. Its actual XC lang
 reflection, development, society and inheritance procedures are run. Autonomous
 conversations also deliver a MusicPulse experience to listeners' LUMINA brains.
 
+## Growing memories and bird-built worlds (source update)
+
+For the existing local `source/little-flock` installation, run **Apply Local Update.cmd**
+from this repository. It backs up the current code and save, replaces the local
+server, and opens the game. The updated local installation has been verified
+running with the existing flock and language archives. Failure rollback has not
+been exercised end to end.
+
+Each bird now keeps a personal SQLite language archive with no fixed word-count
+ceiling. The 256-word XC vocabulary is a working set; relevant archived words and
+experiences are retrieved for conversation using the bird's existing LUMINA node
+state. Descendants inherit the larger word/association archive. Chat changes their
+memories and prompts, not the weights of Qwen. This does not create independent
+kernels per concept node. Storage still depends on available disk space.
+
+The gameplay Heart model responds to interactions and energy, influences rest and
+conversation tone, and recovers over simulated time. Its 90-second smoothing uses
+elapsed simulation time; pausing freezes it. It is a fictional emotional model.
+
+Select a bird and use **Design your own world** in **A little life of their own**.
+They reserve and collect eight personal parts, build a connected world, and head
+there. Established graduates can initiate projects themselves after the 48-tick
+world-building cooldown. Nursery needs and rest retain priority. The existing
+**New world** control spends station supplies for player-created worlds. The
+station currently supports 18 connected worlds.
+
+World artwork is procedural: saved palettes, skyline shapes, floor patterns and
+creator emblems vary with the creator, local save-folder identity, game instance,
+and world identity. Bird traits and remembered words influence the design. Reloads
+preserve the artwork. These are variations of the existing illustrated themes,
+not unrestricted AI image generation or a cloud account identity.
+
+**Natural conversations** lets nearby birds use the shared local Qwen model for
+short reciprocal exchanges. While the page is active, the server checks every 45
+seconds; player chat takes priority. Birds that move apart before completion do
+not deliver the exchange. Offline learned conversations continue if the model is
+unavailable or a generated line repeats. Turn on **Voices** to hear room chatter
+when a local browser voice is available.
+
+Back up `save.json` together with its matching `save.<identity>.language.sqlite3`
+file in `%LOCALAPPDATA%/LittleFlock`, while the server is stopped. Saves carry a
+replayable outbox so interrupted archive commits recover without double-counting.
+Missing or mismatched archive files cause startup to stop rather than silently
+forget memories. Upgrading imports vocabulary and player messages still retained
+by the old save; previously discarded language cannot be reconstructed.
+
+These source features are newer than the published v0.1.0 Windows download.
+
 ## Chat and privacy
 
 The optional chat renderer uses local Ollama at 127.0.0.1:11434 with
@@ -75,9 +123,10 @@ repair, and cassette questions use authored game facts. Other model dialogue may
 still invent details; it has no tools and cannot change inventory or quest flags.
 Player favorite movie/song statements are stored as explicit preferences.
 
-Save, journal, preferences, conversations, and complete XC checkpoints stay in
-`%LOCALAPPDATA%\LittleFlock\save.json`. Saves use one atomic replacement for the
-whole world and every bird's brains. A malformed save is preserved and startup fails
+World state, journal, preferences, recent conversations, and complete XC checkpoints
+stay in `%LOCALAPPDATA%\LittleFlock\save.json`; growing language archives live in
+the matching SQLite file described above. JSON saves use atomic replacement for
+the world and every bird's brains. A malformed save is preserved and startup fails
 with a diagnostic rather than replacing it. There is no offline neglect mechanic.
 
 Schema-1 saves migrate to schema 2 while preserving existing game records and exact
@@ -235,3 +284,41 @@ python desktop.py --self-test .qa/source-check.json
 The public repository intentionally excludes player saves, QA browser profiles,
 logs, local Python environments, and generated release binaries. Vendored XC
 provenance is recorded under `vendor/`; no additional license grant is implied.
+
+
+### Original Lonk life in the habitat
+
+The local source now connects the original XC emotional controller to daily bird
+choices. LUMINA policies supply stimuli; Lonk impulses guide exploration, rest,
+reflection, and playful contests. Territory visits influence traits. Mature
+parents reserve nursery supplies before spending parts on other projects.
+
+Select a bird and look below its parts tray for **A little life of their own**:
+find and keep original Lonk items, give a keepsake to a nearby friend, share a
+remembered message, dream, hug, or hold a leaf duel. Actions have a two-tick
+cooldown; resume a paused world to advance it. Collections, catchphrases, rivals,
+feelings, and remembered gifts persist. Friends must share a room for these
+social actions. A small gold sparkle marks a bird carrying a favorite treasure.
+Chat receives these actual experiences as context; the offline response can
+mention a real collected treasure. Ambient speech still uses the Voices control.
+
+This is an adaptation of the original sandbox: leaf duels do not cause injuries,
+and nursery descendants coexist with their parents. The old death/rebirth loop
+is not enabled. The published v0.1.0 download predates this source update.
+
+
+### Conversation recovery
+
+Direct chat uses a compact, grounded Qwen prompt and removes repeated assistant
+examples from its inference context. Catchphrase-only answers and recycled lines
+are rejected, with one clean model retry. A persistent flock-wide phrase ledger
+blocks exact repeated sentences despite punctuation/case differences, including
+after the visible chat history expires. Existing retained speech is imported;
+older discarded history cannot be reconstructed. The check matches wording, not
+semantic equivalence, and ordinary words may recur. Explicit Read last reply is
+still available when the player wants a replay.
+
+If both model attempts fail and no unused offline response is available, the bird
+listens quietly instead of producing another canned response. Automatic learned
+conversations now pair birds physically sharing a room. These ambient exchanges
+remain native XC word-association speech; Qwen currently serves direct player chat.

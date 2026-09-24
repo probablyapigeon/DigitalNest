@@ -4,7 +4,7 @@ window.WorldRooms = (() => {
   const pinned=new Set();
   const coordinates={workshop:[30,235],commons:[345,235],garden:[655,20],roost:[655,450],nursery:[345,450],archive:[30,20]};
   function open(id){if(!state?.spaces[id])return;current=id;following=false;for(const k of Object.keys(poses))delete poses[k];$('worldMap').close();update();window.WorldLife?.update();}
-  function preview(canvas,id){const g=canvas.getContext('2d');g.clearRect(0,0,300,150);g.save();g.translate(150,72);g.scale(.32,.26);if(state.spaces[id].kind==='workshop')drawStation(g);else SpaceArt.draw(g,state.spaces[id].kind,0,state,state.spaces[id].name);window.WorldBuilder?.drawStructures(g,id,true);for(const [i,key] of state.spaces[id].residents.entries())bird(g,-160+(i%4)*100,55+Math.floor(i/4)*60,.95,key,0,false,true,false);g.restore();}
+  function preview(canvas,id){const g=canvas.getContext('2d');g.clearRect(0,0,300,150);g.save();g.translate(150,72);g.scale(.32,.26);if(state.spaces[id].kind==='workshop'){drawStation(g);SpaceArt.decorate(g,state.spaces[id].design);}else SpaceArt.draw(g,state.spaces[id].kind,0,state,state.spaces[id].name,state.spaces[id].design);window.WorldBuilder?.drawStructures(g,id,true);for(const [i,key] of state.spaces[id].residents.entries())bird(g,-160+(i%4)*100,55+Math.floor(i/4)*60,.95,key,0,false,true,false);g.restore();}
   function card(id,pin=false){const room=state.spaces[id],el=document.createElement('article');el.className='world-card';el.dataset.room=id;
     if(!pin){const [x,y]=coordinates[id];el.style.left=x+'px';el.style.top=y+'px';}
     const button=document.createElement('button');button.className='world-open';button.setAttribute('aria-label',`Open ${room.name}`);button.onclick=()=>open(id);
